@@ -1,8 +1,11 @@
 import { useState, useEffect } from 'react';
 import './App.css';
 import { supabase } from './supabaseClient';
+import type { Session } from '@supabase/supabase-js';
+import Dashboard from './Dashboard';
 
 function App() {
+  const [session, setSession] = useState<Session | null>(null);
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -18,6 +21,18 @@ function App() {
     if (window.location.pathname === '/register' || window.location.search.includes('register=true')) {
       setIsLogin(false);
     }
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   const checkRateLimit = (isLoginAction: boolean) => {
@@ -86,6 +101,10 @@ function App() {
     }
     setIsLoading(false);
   };
+
+  if (session) {
+    return <Dashboard session={session} />;
+  }
 
   return (
     <div className="container">
