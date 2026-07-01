@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from './supabaseClient';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import './Dashboard.css';
 import OnboardingModal from './OnboardingModal';
 
@@ -39,12 +40,27 @@ interface AnalysisLog {
 
 const MEAL_ORDER: MealLog['meal_type'][] = ['breakfast', 'lunch', 'dinner', 'snack'];
 
+const getDefaultMealType = (): MealLog['meal_type'] => {
+  const hour = new Date().getHours();
+  if (hour >= 6 && hour <= 9) return 'breakfast';
+  if (hour >= 11 && hour <= 13) return 'lunch';
+  if (hour >= 17 && hour <= 20) return 'dinner';
+  return 'snack';
+};
+
 // ── SVG Icon Components ────────────────────────────────────────
 
 const IconLogo = () => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
     <line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/>
+  </svg>
+);
+
+const IconCamera = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/>
+    <circle cx="12" cy="13" r="3"/>
   </svg>
 );
 
@@ -214,6 +230,12 @@ function Dashboard({ session }: DashboardProps) {
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'meals' | 'history'>('overview');
 
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [scanResult, setScanResult] = useState<Partial<AnalysisLog> & { meal_type: MealLog['meal_type'] } | null>(null);
+  const [showCamera, setShowCamera] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
   const today = new Date().toISOString().split('T')[0];
 
   const fetchData = useCallback(async () => {
@@ -254,6 +276,29 @@ function Dashboard({ session }: DashboardProps) {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  useEffect(() => {
+    let stream: MediaStream | null = null;
+    if (showCamera) {
+      navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+        .then(s => {
+          stream = s;
+          if (videoRef.current) {
+            videoRef.current.srcObject = s;
+          }
+        })
+        .catch(err => {
+          console.error("Error accessing camera:", err);
+          alert("Could not access camera.");
+          setShowCamera(false);
+        });
+    }
+    return () => {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [showCamera]);
+
   // After onboarding saves, re-fetch profile so dashboard reflects new values
   const handleOnboardingComplete = useCallback(async () => {
     setShowOnboarding(false);
@@ -266,6 +311,121 @@ function Dashboard({ session }: DashboardProps) {
   }, [session.user.id]);
 
   const handleLogout = async () => { await supabase.auth.signOut(); };
+
+  const handleCapture = async () => {
+    if (!videoRef.current || !canvasRef.current) return;
+    
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const base64dataWithPrefix = canvas.toDataURL('image/jpeg', 0.8);
+    const base64data = base64dataWithPrefix.split(',')[1];
+    
+    setShowCamera(false); // Close camera viewfinder
+    setIsAnalyzing(true);
+    
+    try {
+      const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY);
+      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+
+      const prompt = `Analyze this food image. Return a JSON object ONLY with the following structure, with no markdown formatting or backticks:
+      {
+        "food_name": "string (name of food/drink)",
+        "serving_size": "string (e.g. '1 bowl', '200g')",
+        "calories": number,
+        "protein_g": number,
+        "carbs_g": number,
+        "fat_g": number
+      }
+      Provide your best estimates.`;
+
+      const result = await model.generateContent([
+        prompt,
+        { inlineData: { data: base64data, mimeType: "image/jpeg" } }
+      ]);
+      
+      let responseText = result.response.text();
+      responseText = responseText.replace(/```json/gi, '').replace(/```/g, '').trim();
+      const parsed = JSON.parse(responseText);
+
+      setScanResult({
+        food_name: parsed.food_name || 'Unknown Food',
+        serving_size: parsed.serving_size || '1 serving',
+        calories: parsed.calories || 0,
+        protein_g: parsed.protein_g || 0,
+        carbs_g: parsed.carbs_g || 0,
+        fat_g: parsed.fat_g || 0,
+        meal_type: getDefaultMealType()
+      });
+    } catch (err) {
+      console.error("Gemini API Error:", err);
+      alert("Error analyzing image: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const handleSaveScan = async () => {
+    if (!scanResult) return;
+    
+    // Insert into analysis_logs
+    const { data: analysisData, error: analysisError } = await supabase
+      .from('analysis_logs')
+      .insert({
+        user_id: session.user.id,
+        food_name: scanResult.food_name,
+        serving_size: scanResult.serving_size,
+        calories: scanResult.calories,
+        protein_g: scanResult.protein_g,
+        carbs_g: scanResult.carbs_g,
+        fat_g: scanResult.fat_g
+      })
+      .select()
+      .single();
+
+    if (analysisError) {
+      alert("Failed to save scan");
+      return;
+    }
+
+    // Insert or update meal_logs
+    if (scanResult.meal_type) {
+      const existing = mealLogs.find(m => m.meal_type === scanResult.meal_type);
+      if (existing) {
+        await supabase
+          .from('meal_logs')
+          .update({
+            calories: existing.calories + (scanResult.calories || 0),
+            protein_g: Number(existing.protein_g) + Number(scanResult.protein_g || 0),
+            carbs_g: Number(existing.carbs_g) + Number(scanResult.carbs_g || 0),
+            fat_g: Number(existing.fat_g) + Number(scanResult.fat_g || 0)
+          })
+          .eq('id', existing.id);
+      } else {
+        await supabase
+          .from('meal_logs')
+          .insert({
+            user_id: session.user.id,
+            meal_type: scanResult.meal_type,
+            log_date: today,
+            calories: scanResult.calories || 0,
+            protein_g: scanResult.protein_g || 0,
+            carbs_g: scanResult.carbs_g || 0,
+            fat_g: scanResult.fat_g || 0
+          });
+      }
+    }
+
+    setScanResult(null);
+    fetchData();
+  };
 
   const totals = mealLogs.reduce(
     (acc, m) => ({
@@ -305,6 +465,64 @@ function Dashboard({ session }: DashboardProps) {
           onComplete={handleOnboardingComplete}
         />
       )}
+
+      {/* Camera Viewfinder */}
+      {showCamera && (
+        <div className="db-modal-overlay">
+          <div className="db-camera-container">
+            <video ref={videoRef} autoPlay playsInline className="db-camera-video" />
+            <canvas ref={canvasRef} style={{ display: 'none' }} />
+            <div className="db-camera-actions">
+              <button className="db-btn-secondary" onClick={() => setShowCamera(false)}>Cancel</button>
+              <button className="db-btn-primary" onClick={handleCapture}>Capture</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Loading Overlay for Camera */}
+      {isAnalyzing && (
+        <div className="db-loading-overlay">
+          <div className="db-spinner" />
+          <p>Analyzing food with AI...</p>
+        </div>
+      )}
+
+      {/* Scan Confirmation Modal */}
+      {scanResult && (
+        <div className="db-modal-overlay">
+          <div className="db-modal-content">
+            <h2 className="db-modal-title">AI Scan Result</h2>
+            <div className="db-scan-form">
+              <label>Food Name</label>
+              <input type="text" value={scanResult.food_name || ''} onChange={(e) => setScanResult({...scanResult, food_name: e.target.value})} />
+              
+              <label>Serving Size</label>
+              <input type="text" value={scanResult.serving_size || ''} onChange={(e) => setScanResult({...scanResult, serving_size: e.target.value})} />
+              
+              <div className="db-scan-macros-grid">
+                <div><label>Calories</label><input type="number" value={scanResult.calories} onChange={(e) => setScanResult({...scanResult, calories: Number(e.target.value)})} /></div>
+                <div><label>Protein (g)</label><input type="number" value={scanResult.protein_g} onChange={(e) => setScanResult({...scanResult, protein_g: Number(e.target.value)})} /></div>
+                <div><label>Carbs (g)</label><input type="number" value={scanResult.carbs_g} onChange={(e) => setScanResult({...scanResult, carbs_g: Number(e.target.value)})} /></div>
+                <div><label>Fat (g)</label><input type="number" value={scanResult.fat_g} onChange={(e) => setScanResult({...scanResult, fat_g: Number(e.target.value)})} /></div>
+              </div>
+
+              <label>Meal Type</label>
+              <select value={scanResult.meal_type} onChange={(e) => setScanResult({...scanResult, meal_type: e.target.value as any})}>
+                <option value="breakfast">Breakfast (6am - 9am)</option>
+                <option value="lunch">Lunch (11am - 1pm)</option>
+                <option value="dinner">Dinner (5pm - 8pm)</option>
+                <option value="snack">Snack (Anytime)</option>
+              </select>
+            </div>
+            <div className="db-modal-actions">
+              <button className="db-btn-secondary" onClick={() => setScanResult(null)}>Cancel</button>
+              <button className="db-btn-primary" onClick={handleSaveScan}>Save Log</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Sidebar */}
       <aside className="db-sidebar">
         <div className="db-brand">
@@ -510,6 +728,11 @@ function Dashboard({ session }: DashboardProps) {
           </div>
         )}
       </main>
+
+      {/* FAB Camera Button */}
+      <button className="db-fab-camera" onClick={() => setShowCamera(true)} aria-label="Scan food">
+        <IconCamera />
+      </button>
     </div>
   );
 }
