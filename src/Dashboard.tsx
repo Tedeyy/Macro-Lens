@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from './supabaseClient';
 import './Dashboard.css';
+import OnboardingModal from './OnboardingModal';
 
 interface DashboardProps {
   session: Session;
@@ -210,6 +211,7 @@ function Dashboard({ session }: DashboardProps) {
   const [mealLogs, setMealLogs] = useState<MealLog[]>([]);
   const [recentScans, setRecentScans] = useState<AnalysisLog[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'meals' | 'history'>('overview');
 
   const today = new Date().toISOString().split('T')[0];
@@ -237,7 +239,13 @@ function Dashboard({ session }: DashboardProps) {
         .limit(5),
     ]);
 
-    if (profileRes.data) setProfile(profileRes.data);
+    if (profileRes.data) {
+      setProfile(profileRes.data);
+      // Gate: show onboarding if height or weight not set
+      if (!profileRes.data.height_cm || !profileRes.data.weight_kg) {
+        setShowOnboarding(true);
+      }
+    }
     if (mealRes.data) setMealLogs(mealRes.data);
     if (scanRes.data) setRecentScans(scanRes.data);
 
@@ -245,6 +253,17 @@ function Dashboard({ session }: DashboardProps) {
   }, [session.user.id, today]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // After onboarding saves, re-fetch profile so dashboard reflects new values
+  const handleOnboardingComplete = useCallback(async () => {
+    setShowOnboarding(false);
+    const { data } = await supabase
+      .from('user_profiles')
+      .select('full_name, email, daily_calorie_goal, weight_kg, height_cm')
+      .eq('id', session.user.id)
+      .single();
+    if (data) setProfile(data);
+  }, [session.user.id]);
 
   const handleLogout = async () => { await supabase.auth.signOut(); };
 
@@ -279,6 +298,13 @@ function Dashboard({ session }: DashboardProps) {
 
   return (
     <div className="db-root">
+      {/* Onboarding modal — shown over the dashboard when profile is incomplete */}
+      {showOnboarding && (
+        <OnboardingModal
+          userId={session.user.id}
+          onComplete={handleOnboardingComplete}
+        />
+      )}
       {/* Sidebar */}
       <aside className="db-sidebar">
         <div className="db-brand">
