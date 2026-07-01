@@ -1,26 +1,148 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300;0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;0,14..32,800&display=swap');
 
+/* ─────────────────────────────────────────────────────────────
+   DESIGN TOKENS — Dark theme (light theme ready via .light class)
+   ───────────────────────────────────────────────────────────── */
 :root {
-  font-family: 'Inter', system-ui, Avenir, Helvetica, Arial, sans-serif;
+  /* Background layers */
+  --bg-base:        #080d18;
+  --bg-surface:     #0f1623;
+  --bg-elevated:    #161e2e;
+  --bg-overlay:     #1c2740;
+
+  /* Border */
+  --border-subtle:  rgba(255, 255, 255, 0.07);
+  --border-default: rgba(255, 255, 255, 0.12);
+  --border-focus:   #3b82f6;
+
+  /* Text */
+  --text-primary:   #f0f4ff;
+  --text-secondary: #8a9bc0;
+  --text-tertiary:  #4d607e;
+  --text-inverse:   #ffffff;
+
+  /* Brand / Accent */
+  --accent-blue:    #3b82f6;
+  --accent-blue-lt: #60a5fa;
+  --accent-purple:  #7c3aed;
+  --accent-purple-lt: #a78bfa;
+  --accent-amber:   #d97706;
+  --accent-amber-lt: #fbbf24;
+  --accent-green:   #059669;
+  --accent-green-lt: #34d399;
+  --accent-red:     #dc2626;
+  --accent-red-lt:  #f87171;
+
+  /* Gradient */
+  --gradient-brand: linear-gradient(135deg, var(--accent-blue) 0%, var(--accent-purple) 100%);
+  --gradient-brand-text: linear-gradient(90deg, var(--accent-blue-lt), var(--accent-purple-lt));
+
+  /* Input */
+  --input-bg:       rgba(9, 14, 28, 0.8);
+  --input-border:   rgba(255, 255, 255, 0.1);
+  --input-border-hover: rgba(255, 255, 255, 0.18);
+
+  /* Shadow */
+  --shadow-sm:  0 1px 3px rgba(0,0,0,0.3);
+  --shadow-md:  0 4px 16px rgba(0,0,0,0.4);
+  --shadow-lg:  0 16px 48px rgba(0,0,0,0.5);
+  --shadow-xl:  0 32px 80px rgba(0,0,0,0.6);
+
+  /* Radius */
+  --radius-sm:  6px;
+  --radius-md:  10px;
+  --radius-lg:  16px;
+  --radius-xl:  22px;
+  --radius-full: 9999px;
+
+  /* Spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* Typography */
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-size: 16px;
   line-height: 1.5;
   font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
 
-  color-scheme: dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #0f172a;
+/* ─── Light theme token overrides (future use) ─────────────── */
+.theme-light {
+  --bg-base:        #f4f6fb;
+  --bg-surface:     #ffffff;
+  --bg-elevated:    #f0f4ff;
+  --bg-overlay:     #e8edf8;
+  --border-subtle:  rgba(0, 0, 0, 0.06);
+  --border-default: rgba(0, 0, 0, 0.12);
+  --text-primary:   #0f172a;
+  --text-secondary: #475569;
+  --text-tertiary:  #94a3b8;
+  --input-bg:       #ffffff;
+  --input-border:   rgba(0, 0, 0, 0.12);
+  --input-border-hover: rgba(0, 0, 0, 0.22);
+  --shadow-sm:  0 1px 3px rgba(0,0,0,0.08);
+  --shadow-md:  0 4px 16px rgba(0,0,0,0.1);
+  --shadow-lg:  0 16px 48px rgba(0,0,0,0.12);
+  --shadow-xl:  0 32px 80px rgba(0,0,0,0.14);
+}
+
+/* ─── Reset & Base ──────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  min-height: 100vh;
+  width: 100%;
 }
 
 body {
-  margin: 0;
-  min-width: 320px;
-  min-height: 100vh;
-  background: radial-gradient(circle at 50% -20%, #1e1b4b, #0f172a);
+  background-color: var(--bg-base);
+  color: var(--text-primary);
+  background-image:
+    radial-gradient(ellipse 60% 50% at 20% -10%, rgba(59, 82, 246, 0.12) 0%, transparent 60%),
+    radial-gradient(ellipse 50% 40% at 80% 110%, rgba(124, 58, 237, 0.1) 0%, transparent 60%);
+  background-attachment: fixed;
 }
 
-* {
-  box-sizing: border-box;
+h1, h2, h3, h4, h5, h6 { margin: 0; font-weight: 600; }
+
+p { margin: 0; }
+
+a {
+  color: var(--accent-blue-lt);
+  text-decoration: none;
 }
 
-h1, h2, h3, h4, h5, h6 {
-  margin: 0;
+a:hover {
+  text-decoration: underline;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+input, textarea, select {
+  font-family: inherit;
+}
+
+/* ─── Scrollbar ─────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--bg-overlay);
+  border-radius: var(--radius-full);
 }
