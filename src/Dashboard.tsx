@@ -399,7 +399,7 @@ function Dashboard({ session }: DashboardProps) {
     if (!scanResult) return;
     
     // Insert into analysis_logs
-    const { data: analysisData, error: analysisError } = await supabase
+    const { error: analysisError } = await supabase
       .from('analysis_logs')
       .insert({
         user_id: session.user.id,
