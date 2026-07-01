@@ -1,0 +1,89 @@
+-- 1. USER PROFILES TABLE
+-- This table links directly to Supabase's managed auth system
+-- REMAKING THE USER PROFILES TABLE
+drop table if exists public.user_profiles cascade;
+
+create table public.user_profiles (
+    -- Links securely to Supabase Auth (auth.users)
+    id uuid references auth.users on delete cascade primary key,
+    updated_at timestamp with time zone default timezone('utc'::text, now()) not null,
+    
+    -- Account Details
+    full_name text,
+    email text unique not null, -- Added email tracking safely
+    avatar_url text,
+    
+    -- Fitness & Calorie Tracking Metrics
+    height_cm decimal(5,2), -- e.g., 175.50
+    weight_kg decimal(5,2), -- e.g., 70.25
+    daily_calorie_goal integer default 2000,
+    
+    constraint height_positive check (height_cm > 0),
+    constraint weight_positive check (weight_kg > 0)
+);
+
+-- Re-enable Row Level Security (RLS)
+alter table public.user_profiles enable row level security;
+
+create policy "Users can view their own profile" on public.user_profiles 
+    for select using (auth.uid() = id);
+
+create policy "Users can update their own profile" on public.user_profiles 
+    for update using (auth.uid() = id);
+
+
+-- 2. ANALYSIS LOG TABLE
+-- Logs every AI food scan, matching your strict JSON structure
+create table public.analysis_logs (
+    id uuid default gen_random_uuid() primary key,
+    user_id uuid references public.user_profiles(id) on delete cascade not null,
+    scanned_at timestamp with time zone default timezone('utc'::text, now()) not null,
+    
+    -- Food Metadata
+    food_name text not null,
+    serving_size text, -- e.g., "1 plate", "250g", "1 medium apple"
+    image_url text,    -- If you choose to save the scanned snaps to Supabase Storage
+    
+    -- Macronutrients & Calories
+    calories integer not null,
+    protein_g decimal(5,1) default 0.0,
+    carbs_g decimal(5,1) default 0.0,
+    fat_g decimal(5,1) default 0.0
+);
+
+-- Enable RLS
+alter table public.analysis_logs enable row level security;
+
+create policy "Users can view their own logs" on public.analysis_logs 
+    for select using (auth.uid() = user_id);
+
+create policy "Users can insert their own logs" on public.analysis_logs 
+    for insert with check (auth.uid() = user_id);
+
+create policy "Users can delete their own logs" on public.analysis_logs 
+    for delete using (auth.uid() = user_id);
+
+
+-- 3. TRIGGER FOR NEW USERS
+-- Automatically create a user profile when a new user signs up
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  insert into public.user_profiles (id, email, full_name, avatar_url)
+  values (
+    new.id,
+    new.email,
+    new.raw_user_meta_data->>'full_name',
+    new.raw_user_meta_data->>'avatar_url'
+  );
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute procedure public.handle_new_user();
