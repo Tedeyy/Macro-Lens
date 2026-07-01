@@ -1,3 +1,7 @@
+# Sensitive Data
+.env.*
+.env
+
 # Logs
 logs
 *.log
