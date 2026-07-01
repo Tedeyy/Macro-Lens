@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from './supabaseClient';
 import { GoogleGenerativeAI } from '@google/generative-ai';
@@ -155,7 +155,7 @@ const IconEmptyScans = () => (
   </svg>
 );
 
-const MEAL_ICONS: Record<MealLog['meal_type'], JSX.Element> = {
+const MEAL_ICONS: Record<MealLog['meal_type'], React.JSX.Element> = {
   breakfast: <IconMealBreakfast />,
   lunch: <IconMealLunch />,
   dinner: <IconMealDinner />,
@@ -236,6 +236,11 @@ function Dashboard({ session }: DashboardProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
+  const [scannedImage, setScannedImage] = useState<string | null>(null);
+  const [lastScanTime, setLastScanTime] = useState<number>(0);
+  const SCAN_COOLDOWN_MS = 10000; // 10 seconds cooldown
+  const [cooldownRemaining, setCooldownRemaining] = useState<number>(0);
+
   const today = new Date().toISOString().split('T')[0];
 
   const fetchData = useCallback(async () => {
@@ -277,6 +282,16 @@ function Dashboard({ session }: DashboardProps) {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   useEffect(() => {
+    if (lastScanTime === 0) return;
+    const interval = setInterval(() => {
+      const remaining = Math.max(0, SCAN_COOLDOWN_MS - (Date.now() - lastScanTime));
+      setCooldownRemaining(remaining);
+      if (remaining === 0) clearInterval(interval);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [lastScanTime]);
+
+  useEffect(() => {
     let stream: MediaStream | null = null;
     if (showCamera) {
       navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
@@ -313,6 +328,11 @@ function Dashboard({ session }: DashboardProps) {
   const handleLogout = async () => { await supabase.auth.signOut(); };
 
   const handleCapture = async () => {
+    if (Date.now() - lastScanTime < SCAN_COOLDOWN_MS) {
+      alert(`Please wait ${Math.ceil(cooldownRemaining / 1000)} seconds before scanning again.`);
+      return;
+    }
+
     if (!videoRef.current || !canvasRef.current) return;
     
     const video = videoRef.current;
@@ -328,6 +348,7 @@ function Dashboard({ session }: DashboardProps) {
     const base64dataWithPrefix = canvas.toDataURL('image/jpeg', 0.8);
     const base64data = base64dataWithPrefix.split(',')[1];
     
+    setScannedImage(base64dataWithPrefix);
     setShowCamera(false); // Close camera viewfinder
     setIsAnalyzing(true);
     
@@ -364,6 +385,8 @@ function Dashboard({ session }: DashboardProps) {
         fat_g: parsed.fat_g || 0,
         meal_type: getDefaultMealType()
       });
+      setLastScanTime(Date.now());
+      setCooldownRemaining(SCAN_COOLDOWN_MS);
     } catch (err) {
       console.error("Gemini API Error:", err);
       alert("Error analyzing image: " + (err instanceof Error ? err.message : String(err)));
@@ -491,8 +514,11 @@ function Dashboard({ session }: DashboardProps) {
       {/* Scan Confirmation Modal */}
       {scanResult && (
         <div className="db-modal-overlay">
-          <div className="db-modal-content">
+          <div className="db-modal-content" style={{ maxHeight: '90vh', overflowY: 'auto' }}>
             <h2 className="db-modal-title">AI Scan Result</h2>
+            {scannedImage && (
+              <img src={scannedImage} alt="Scanned food" style={{ width: '100%', maxHeight: '200px', objectFit: 'cover', borderRadius: '8px', marginBottom: '16px' }} />
+            )}
             <div className="db-scan-form">
               <label>Food Name</label>
               <input type="text" value={scanResult.food_name || ''} onChange={(e) => setScanResult({...scanResult, food_name: e.target.value})} />
@@ -730,8 +756,19 @@ function Dashboard({ session }: DashboardProps) {
       </main>
 
       {/* FAB Camera Button */}
-      <button className="db-fab-camera" onClick={() => setShowCamera(true)} aria-label="Scan food">
+      <button 
+        className="db-fab-camera" 
+        onClick={() => setShowCamera(true)} 
+        aria-label="Scan food"
+        disabled={cooldownRemaining > 0}
+        style={{ opacity: cooldownRemaining > 0 ? 0.5 : 1 }}
+      >
         <IconCamera />
+        {cooldownRemaining > 0 && (
+          <span style={{ position: 'absolute', top: -10, right: -10, background: '#ef4444', color: 'white', borderRadius: '50%', padding: '2px 6px', fontSize: '12px', fontWeight: 'bold' }}>
+            {Math.ceil(cooldownRemaining / 1000)}s
+          </span>
+        )}
       </button>
     </div>
   );
